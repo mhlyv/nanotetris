@@ -1,11 +1,11 @@
 #ifndef __TETRIS_H__
 #define __TETRIS_H__
 
-#include <stdio.h>
 #include <stdint.h>
 
 #define BOARD_W 10
 #define BOARD_H 20
+#define N_TETROMINOS 7
 
 struct Tetris {
 	// Tetris board represented as 200 bits.
@@ -15,7 +15,7 @@ struct Tetris {
 	// Order: I, O, T, J, L, S, Z.
 	// The last bit is always 0, so instead the first bit represents
 	// if the given tetromino is 3x3 (0) or 4x4 (1).
-	uint16_t tetrominos[7];
+	uint16_t tetrominos[N_TETROMINOS];
 
 	// The index of the currently active tetromino [0 .. 6].
 	uint8_t tetromino;
@@ -25,13 +25,138 @@ struct Tetris {
 	int8_t y;
 } tetris;
 
-static inline void init();
-static uint8_t getTetrominoBlock(uint8_t t, uint8_t x, uint8_t y);
-static uint8_t getBoardBlock(uint8_t x, uint8_t y);
-static void rotateTetrominoCCW(uint8_t t);
-static void rotateTetrominoCW(uint8_t t);
+// this is just a forward declaration, the user must implement this
+uint8_t tetris_random();
 
-static inline void init() {
+// return the block (bit) in the tetromino with index t at (x, y)
+static uint8_t tetris_get_tetromino_block(uint8_t t, uint8_t x, uint8_t y) {
+	// get the size from the first bit
+	uint8_t size = 3 + (tetris.tetrominos[t] >> 15);
+	uint8_t bitindex = y * size + x;
+
+	// handle out of bounds indexes
+	return (x >= size || y >= size) ? 0
+		: ((tetris.tetrominos[t] >> (14 - bitindex)) & 1);
+}
+
+// return the block (bit) on the board at (x, y) without the tetromino on it
+static uint8_t tetris_get_raw_board_block(uint8_t x, uint8_t y) {
+	uint8_t bitindex = (y * BOARD_W) + x;
+	return (tetris.board[bitindex / 8] >> (7 - (bitindex % 8))) & 1;
+}
+
+// return the block (bit) on the board at (x, y) with the tetromino on it
+static uint8_t tetris_get_board_block(uint8_t x, uint8_t y) {
+	uint8_t bitindex = (y * BOARD_W) + x;
+	uint8_t tetromino_overlay = tetris_get_tetromino_block(
+			tetris.tetromino, x - tetris.x, y - tetris.y);
+	return ((tetris.board[bitindex / 8] >> (7 - (bitindex % 8))) & 1) |
+		tetromino_overlay;
+}
+
+static void tetris_set_board_block(uint8_t x, uint8_t y, uint8_t val) {
+	uint8_t bitindex = (y * BOARD_W) + x;
+	// make sure val is either 0 or 1
+	val &= 1;
+	tetris.board[bitindex / 8] |= (val << (7 - (bitindex % 8)));
+}
+
+// if the tetromino hangs out of the board, push it in
+static void tetris_fix_overhang() {
+	// get the size from the first bit
+	uint8_t size = 3 + (tetris.tetrominos[tetris.tetromino] >> 15);
+
+	for (uint8_t i = 0; i < size; i++) {
+		for (uint8_t j = 0; j < size; j++) {
+			if (tetris_get_tetromino_block(tetris.tetromino, j, i)) {
+				while (j + tetris.x < 0) {
+					tetris.x++;
+				}
+				while (j + tetris.x >= BOARD_W) {
+					tetris.x--;
+				}
+			}
+		}
+	}
+}
+
+static void tetris_rotate_tetromino_ccw(uint8_t t) {
+	// clear tetromino, but keep the size indicator
+	uint16_t rotated = tetris.tetrominos[t] & (1 << 15);
+	// get the size from the first bit
+	uint8_t size = 3 + (tetris.tetrominos[t] >> 15);
+
+	// rotate counter clockwise
+	for (uint8_t i = 0; i < size; i++) {
+		for (uint8_t j = 0; j < size; j++) {
+			rotated |= tetris_get_tetromino_block(t, size - 1 - i, j) <<
+				(14 - i * size - j);
+		}
+	}
+
+	tetris.tetrominos[t] = rotated;
+}
+
+static void tetris_rotate_tetromino_cw(uint8_t t) {
+	// clear tetromino, but keep the size indicator
+	uint16_t rotated = tetris.tetrominos[t] & (1 << 15);
+	// get the size from the first bit
+	uint8_t size = 3 + (tetris.tetrominos[t] >> 15);
+
+	// rotate clockwise
+	for (uint8_t i = 0; i < size; i++) {
+		for (uint8_t j = 0; j < size; j++) {
+			rotated |= tetris_get_tetromino_block(t, i, size - 1 - j) <<
+				(14 - i * size - j);
+		}
+	}
+
+	tetris.tetrominos[t] = rotated;
+}
+
+static inline void tetris_rotate_ccw() {
+	tetris_rotate_tetromino_ccw(tetris.tetromino);
+	tetris_fix_overhang();
+}
+
+static inline void tetris_rotate_cw() {
+	tetris_rotate_tetromino_cw(tetris.tetromino);
+	tetris_fix_overhang();
+}
+
+static inline void tetris_move_tetromino_right() {
+	tetris.x++;
+	tetris_fix_overhang();
+}
+
+static inline void tetris_move_tetromino_left() {
+	tetris.x--;
+	tetris_fix_overhang();
+}
+
+static void tetris_set_new_tetromino() {
+	// set a new random tetromino
+	tetris.tetromino = tetris_random() % N_TETROMINOS;
+
+	// get the size from the first bit
+	uint8_t size = 3 + (tetris.tetrominos[tetris.tetromino] >> 15);
+
+	// set a new random starting position
+	tetris.x = tetris_random() % (BOARD_W - size);
+	tetris.y = 0;
+
+	// rotate the tetromino to a random position
+	uint8_t rotations = tetris_random() % 4;
+	if (rotations == 3) {
+		tetris_rotate_ccw();
+	} else {
+		while (rotations--) {
+			tetris_rotate_cw();
+		}
+	}
+}
+
+static inline void tetris_init() {
 	// empty board
 	for (uint8_t i = 0; i < (BOARD_W * BOARD_H) / 8; i++) {
 		tetris.board[i] = 0;
@@ -105,59 +230,52 @@ static inline void init() {
 	// 0b0000110011000000 = 0xCC0
 	tetris.tetrominos[6] = 0xCC0;
 
-	// These will be overwritten when choosing a random tetromino.
-	tetris.tetromino = 0;
-	tetris.x = 0;
-	tetris.y = 0;
+	tetris_set_new_tetromino();
 }
 
-// return the block (bit) in the tetromino with index t at (x, y)
-static uint8_t getTetrominoBlock(uint8_t t, uint8_t x, uint8_t y) {
+static inline uint8_t tetris_check_collision() {
 	// get the size from the first bit
-	uint8_t size = 3 + (tetris.tetrominos[t] >> 15);
-	uint8_t bitindex = y * size + x;
+	uint8_t size = 3 + (tetris.tetrominos[tetris.tetromino] >> 15);
 
-	// handle out of bounds indexes
-	return (x >= size || y >= size) ? 0 : ((tetris.tetrominos[t] >> (14 - bitindex)) & 1);
-}
-
-// return the block (bit) on the board at (x, y)
-static uint8_t getBoardBlock(uint8_t x, uint8_t y) {
-	uint8_t bitindex = (y * BOARD_W) + x;
-	uint8_t tetromino_overlay = getTetrominoBlock(tetris.tetromino, x - tetris.x, y - tetris.y);
-	return ((tetris.board[bitindex / 8] >> (7 - (bitindex % 8))) & 1) | tetromino_overlay;
-}
-
-static void rotateTetrominoCCW(uint8_t t) {
-	// clear tetromino, but keep the size indicator
-	uint16_t rotated = tetris.tetrominos[t] & (1 << 15);
-	// get the size from the first bit
-	uint8_t size = 3 + (tetris.tetrominos[t] >> 15);
-
-	// rotate counter clockwise
 	for (uint8_t i = 0; i < size; i++) {
 		for (uint8_t j = 0; j < size; j++) {
-			rotated |= getTetrominoBlock(t, size - 1 - i, j) << (14 - i * size - j);
+			// if there is a block
+			if (tetris_get_tetromino_block(tetris.tetromino, j, i)) {
+				// check if the block is at the bottom or if there is a block
+				// under it
+				if (i + tetris.y == BOARD_H - 1 ||
+						tetris_get_raw_board_block(j + tetris.x,
+							i + tetris.y + 1)) {
+					return 1;
+				}
+			}
 		}
 	}
 
-	tetris.tetrominos[t] = rotated;
+	return 0;
 }
 
-static void rotateTetrominoCW(uint8_t t) {
-	// clear tetromino, but keep the size indicator
-	uint16_t rotated = tetris.tetrominos[t] & (1 << 15);
+static void tetris_save_tetromino_to_board() {
 	// get the size from the first bit
-	uint8_t size = 3 + (tetris.tetrominos[t] >> 15);
+	uint8_t size = 3 + (tetris.tetrominos[tetris.tetromino] >> 15);
 
-	// rotate clockwise
 	for (uint8_t i = 0; i < size; i++) {
 		for (uint8_t j = 0; j < size; j++) {
-			rotated |= getTetrominoBlock(t, i, size - 1 - j) << (14 - i * size - j);
+			// if there is a block
+			if (tetris_get_tetromino_block(tetris.tetromino, j, i)) {
+				tetris_set_board_block(tetris.x + j, tetris.y + i, 1);
+			}
 		}
 	}
+}
 
-	tetris.tetrominos[t] = rotated;
+static inline void tetris_update() {
+	if (tetris_check_collision()) {
+		tetris_save_tetromino_to_board();
+		tetris_set_new_tetromino();
+	} else {
+		tetris.y++;
+	}
 }
 
 #endif // __TETRIS_H__

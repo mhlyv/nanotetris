@@ -42,7 +42,7 @@ static uint8_t tetris_get_tetromino_block(uint8_t t, uint8_t x, uint8_t y) {
 // return the block (bit) on the board at (x, y) without the tetromino on it
 static uint8_t tetris_get_raw_board_block(uint8_t x, uint8_t y) {
 	uint8_t bitindex = (y * BOARD_W) + x;
-	return (tetris.board[bitindex / 8] >> (7 - (bitindex % 8))) & 1;
+	return ((tetris.board[bitindex / 8] >> (7 - (bitindex % 8)))) & 1;
 }
 
 // return the block (bit) on the board at (x, y) with the tetromino on it
@@ -56,9 +56,13 @@ static uint8_t tetris_get_board_block(uint8_t x, uint8_t y) {
 
 static void tetris_set_board_block(uint8_t x, uint8_t y, uint8_t val) {
 	uint8_t bitindex = (y * BOARD_W) + x;
-	// make sure val is either 0 or 1
-	val &= 1;
-	tetris.board[bitindex / 8] |= (val << (7 - (bitindex % 8)));
+	if (val) {
+		// set bit
+		tetris.board[bitindex / 8] |= (1 << (7 - (bitindex % 8)));
+	} else {
+		// clear bit
+		tetris.board[bitindex / 8] &= ~(1 << (7 - (bitindex % 8)));
+	}
 }
 
 // if the tetromino hangs out of the board, push it in
@@ -143,7 +147,7 @@ static void tetris_set_new_tetromino() {
 
 	// set a new random starting position
 	tetris.x = tetris_random() % (BOARD_W - size);
-	tetris.y = 0;
+	tetris.y = -(int8_t)size;
 
 	// rotate the tetromino to a random position
 	uint8_t rotations = tetris_random() % 4;
@@ -236,17 +240,24 @@ static inline void tetris_init() {
 static inline uint8_t tetris_check_collision() {
 	// get the size from the first bit
 	uint8_t size = 3 + (tetris.tetrominos[tetris.tetromino] >> 15);
+	int8_t x;
+	int8_t y;
 
 	for (uint8_t i = 0; i < size; i++) {
 		for (uint8_t j = 0; j < size; j++) {
 			// if there is a block
 			if (tetris_get_tetromino_block(tetris.tetromino, j, i)) {
-				// check if the block is at the bottom or if there is a block
-				// under it
-				if (i + tetris.y == BOARD_H - 1 ||
-						tetris_get_raw_board_block(j + tetris.x,
-							i + tetris.y + 1)) {
+				x = tetris.x + j;
+				y = tetris.y + i;
+
+				// check if the block is at the bottom
+				if (y == BOARD_H - 1) {
 					return 1;
+				} else if (x >= 0 && x < BOARD_W && y >= 0 && y < BOARD_H - 1) {
+					// check if there is a block under it
+					if (tetris_get_raw_board_block(x, y + 1)) {
+						return 1;
+					}
 				}
 			}
 		}
@@ -269,9 +280,39 @@ static void tetris_save_tetromino_to_board() {
 	}
 }
 
+static inline void tetris_remove_row(uint8_t r) {
+	// shift all rows down
+	for (uint8_t i = r; i > 0; i--) {
+		for (uint8_t j = 0; j < BOARD_W; j++) {
+			tetris_set_board_block(j, i, tetris_get_raw_board_block(j, i - 1));
+		}
+	}
+
+	// set first row to 0
+	for (uint8_t j = 0; j < BOARD_W; j++) {
+		tetris_set_board_block(j, 0, 0);
+	}
+}
+
+// remove the full rows from the board
+static void tetris_remove_full_rows() {
+	uint8_t is_full;
+	for (int8_t i = BOARD_H - 1; i >= 0; i--) {
+		is_full = 1;
+		for (uint8_t j = 0; is_full && j < BOARD_W; j++) {
+			is_full = tetris_get_board_block(j, i);
+		}
+		if (is_full) {
+			tetris_remove_row(i);
+			i++;
+		}
+	}
+}
+
 static inline void tetris_update() {
 	if (tetris_check_collision()) {
 		tetris_save_tetromino_to_board();
+		tetris_remove_full_rows();
 		tetris_set_new_tetromino();
 	} else {
 		tetris.y++;

@@ -33,54 +33,8 @@ static inline void print_tetromino(uint8_t t) {
 	}
 }
 
-#ifdef TEST
-static inline void test() {
-	tetris_init();
-	tetris.tetromino = 4;
-	tetris.x = 3;
-	tetris.y = 1;
-	print_board();
-
-	for (uint8_t i = 0; i < 7; i++) {
-		puts("----------------");
-		print_tetromino(i);
-		puts("----------------");
-	}
-
-	for (uint8_t i = 0; i < 7; i++) {
-		tetris_rotate_tetromino_cw(i);
-	}
-
-	for (uint8_t i = 0; i < 7; i++) {
-		puts("----------------");
-		print_tetromino(i);
-		puts("----------------");
-	}
-
-	print_board();
-
-	for (uint8_t i = 0; i < 7; i++) {
-		tetris_rotate_tetromino_ccw(i);
-		tetris_rotate_tetromino_ccw(i);
-	}
-
-	for (uint8_t i = 0; i < 7; i++) {
-		puts("----------------");
-		print_tetromino(i);
-		puts("----------------");
-	}
-
-	tetris_set_board_block(2, 2, 1);
-	tetris_set_board_block(3, 4, 1);
-	print_board();
-}
-#endif // TEST
-
 int main() {
 	srand(time(NULL));
-#ifdef TEST
-	test();
-#endif // TEST
 	tetris_init();
 
 	while (1) {
@@ -110,6 +64,7 @@ int main() {
 				break;
 		}
 		tetris_update();
+		print_tetris();
 	}
 
 	print_board();
